@@ -1,0 +1,260 @@
+import Message
+
+procedure INITIATE
+    begin
+        call procedure FIND()
+    end
+
+// execute function on another node
+procedure SEND_MESSAGE with ARGS (function, id_district, message)
+    begin
+        set SELECTED_NODE := select node from network nodes where node.ID == id_district
+        call procedure function(message) on SELECTED_NODE
+    end
+
+procedure FIND with ARGS ()
+    begin
+        set STATUS := "FINIDING"
+
+        set MINIMAL_ROAD_DISTANCE := INF
+        set TEST_REQUEST_COUNT := 0
+        set TEST_RESPONSE_COUNT := 0
+
+        for each NEIGHBOUR in NEIGHBOURS:
+            if NEIGHBOUR is not in NEIGHBOURS_IN_CITY then:
+                set TEST_REQUEST_COUNT := TEST_REQUEST_COUNT + 1
+
+                call procedure SEND_MESSAGE("TEST", NEIGHBOUR.id_district, Message(data = {
+                    item1 (string) "id_district": ID,
+                    item2 (string) "city_name": CITY_NAME,
+                    item3 (integer) "road_distance": NEIGHBOUR.road_distance,
+                }))
+            endif
+        endfor
+
+        set FIND_REQUEST_COUNT := 0
+        set FIND_RESPONSE_COUNT := 0
+
+        for each NEIGHBOUR_IN_CITY in NEIGHBOURS_IN_CITY:
+            if NEIGHBOUR_IN_CITY.id_district != PARENT_DISTRICT_ID then:
+                call SEND_MESSAGE("FIND", NEIGHBOUR_IN_CITY)
+            endif
+        endfor
+    end
+
+procedure TEST with ARGS (MESSAGE)
+    begin
+        if MESSAGE.city_name != CITY_NAME then:
+            call procedure SEND_MESSAGE("ACCEPT", MESSAGE.id_district, Message(data = { 
+                item1 (integer) "road_distance": MESSAGE.road_distance 
+            }))
+        else
+            call procedure SEND_MESSAGE("REJECT", MESSAGE.id_district, nil)
+        endif
+    end
+
+procedure ACCEPT with ARGS (MESSAGE)
+    begin
+        if MESSAGE.road_distance < MINIMAL_ROAD_DISTANCE then:
+            MINIMAL_ROAD_DISTANCE := MESSAGE.road_distance
+        endif
+
+        set TEST_RESPONSE_COUNT := TEST_RESPONSE_COUNT + 1
+
+        if TEST_RESPONSE_COUNT == TEST_REQUEST_COUNT and FIND_RESPONSE_COUNT == FIND_REQUEST_COUNT then:
+            call procedure SEND_MESSAGE('FOUND', PARENT_DISTRICT_ID, Message(data = {
+                item1 (integer) "minimal_road_distance": MINIMAL_ROAD_DISTANCE
+            }))
+        endif
+    end
+
+procedure REJECT with ARGS ()
+    begin
+        set TEST_RESPONSE_COUNT := TEST_RESPONSE_COUNT + 1
+
+        if TEST_RESPONSE_COUNT == TEST_REQUEST_COUNT and FIND_RESPONSE_COUNT == FIND_REQUEST_COUNT then:
+            call procedure SEND_MESSAGE('FOUND', PARENT_DISTRICT_ID, Message(data = {
+                item1 (integer) "minimal_road_distance": MINIMAL_ROAD_DISTANCE
+            }))
+        endif
+    end
+
+procedure FOUND with ARGS(MESSAGE)
+    begin
+        set FIND_RESPONSE_COUNT := FIND_RESPONSE_COUNT + 1
+
+        if MESSAGE.minimal_road_distance < MINIMAL_ROAD_DISTANCE then:
+            set MINIMAL_ROAD_DISTANCE := MESSAGE.minimal_road_distance
+        endif
+
+        if FIND_RESPONSE_COUNT == FIND_REQUEST_COUNT then:
+            set STATUS := "AVAILABLE"
+
+            if DOWNTOWN == ID then:
+                if MINIMAL_ROAD_DISTANCE == INF then:
+                    call procedure DONE()
+                else:
+                    call procedure CONNECT(Message(data = {
+                        item1 (integer) "minimal_road_distance": MINIMAL_ROAD_DISTANCE
+                    }))
+                endif
+            else:
+                call procedure SEND_MESSAGE("FOUND", PARENT_DISTRICT_ID, Message(data = { 
+                    item1 (integer) "minimal_road_distance": MESSAGE.road_distance 
+                }))
+            endif
+        endif
+    end
+
+procedure CONNECT with ARGS (MESSAGE)
+    begin
+        set STATUS := "CONNECTING"
+
+        for each NEIGHBOUR in NEIGHBOURS:
+            if NEIGHBOUR.road_distance == MESSAGE.road_distance:
+                set SENT_CONNECTION_REQUEST = {
+                    item1 (integer) "id_district": NEIGHBOUR.id_district,
+                    item2 (integer) "road_distance": MESSAGE.road_distance,
+                }
+
+                call procedure SEND_MESSAGE("MERGE", NEIGHBOUR.id_district, Message(data = { 
+                    item1 (integer) "id_district": ID,
+                    item2 (integer) "level": LEVEL,
+                    item3 (integer) "road_distance": MESSAGE.road_distance,
+                }))
+            endif
+        endfor
+
+        for each NEIGHBOUR_IN_CITY in NEIGHBOURS_IN_CITY:
+            if NEIGHBOUR_IN_CITY.id_district != PARENT_DISTRICT_ID then:
+                call procedure SEND_MESSAGE("CONNECT", NEIGHBOUR_IN_CITY.id_district, MESSAGE)
+            endif
+        endfor
+    end
+
+procedure LETS_MERGE with ARGS (MESSAGE)
+    begin
+        if MESSAGE.level == LEVEL then and SENT_CONNECTION_REQUEST != nil and MESSAGE.id_district == SENT_CONNECTION_REQUEST.id_district:
+            set LEVEL := LEVEL + 1
+
+            if MESSAGE.id_district < ID then:
+                set DOWNTOWN := MESSAGE.id_district
+                set PARENT_DISTRICT_ID := MESSAGE.id_district
+                set CITY_NAME := string(DOWNTOWN)
+
+                call procedure SEND_MESSAGE("CHANGE_ROOT", MESSAGE.id_district, Message(data = {
+                    item1 (integer) "downtown": DOWNTOWN,
+                    item2 (integer) "level": LEVEL,
+                    item3 (string) "city_name": CITY_NAME,
+                    item4 (integer) "parent_district_id": nil,
+                    item5 (integer) "road_distance": MESSAGE.road_distance, // we need to add road_distance only in first CHANGE_ROOT call othwervise we would not have bidirectional MST
+                }))
+            else:
+                set DOWNTOWN := MESSAGE.ID
+                set CITY_NAME := string(DOWNTOWN)
+
+                call procedure SEND_MESSAGE("CHANGE_ROOT", MESSAGE.id_district, Message(data = {
+                    item1 (integer) "downtown": DOWNTOWN,
+                    item2 (integer) "level": LEVEL,
+                    item3 (string) "city_name": CITY_NAME,
+                    item4 (integer) "parent_district_id": ID,
+                    item5 (integer) "road_distance": MESSAGE.road_distance, // we need to add road_distance only in first CHANGE_ROOT call othwervise we would not have bidirectional MST
+                }))
+            endif
+
+            insert {id_district: MESSAGE.id_district, road_distance: SENT_CONNECTION_REQUEST.road_distance} to NEIGHBOURS_IN_CITY
+
+            set STATUS := "CHANGING_ROOT"
+            set CHANGE_ROOT_REQUEST_COUNT := 0
+            set CHANGE_ROOT_RESPONSE_COUNT := 0
+
+            for each NEIGHBOUR_IN_CITY in NEIGHBOURS_IN_CITY:
+                if NEIGHBOUR_IN_CITY.id_district != MESSAGE.id_district:
+                    call procedure SEND_MESSAGE("CHANGE_ROOT", MESSAGE.id_district, Message(data = {
+                        item1 (integer) "downtown": DOWNTOWN,
+                        item2 (integer) "level": LEVEL,
+                        item3 (string) "city_name": CITY_NAME,
+                        item4 (integer) "parent_district_id": ID
+                    }))
+                endif
+            endfor
+        else if MESSAGE.level < LEVEL then:
+            set STATUS := "CHANGING_ROOT"
+            set CHANGE_ROOT_REQUEST_COUNT := 0
+            set CHANGE_ROOT_RESPONSE_COUNT := 0
+
+            call procedure SEND_MESSAGE("CHANGE_ROOT", MESSAGE.id_district, Message(data = {
+                item1 (integer) "downtown": DOWNTOWN,
+                item2 (integer) "level": LEVEL,
+                item3 (string) "city_name": CITY_NAME,
+                item4 (integer) "parent_district_id": ID,
+                item5 (integer) "road_distance": MESSAGE.road_distance,
+            }))
+
+            insert {id_district: MESSAGE.id_district, road_distance: SENT_CONNECTION_REQUEST.road_distance} to NEIGHBOURS_IN_CITY
+        else:
+            SUSPENDED_CONNECTION_REQUESTS.insert({
+                item1 (integer) "id_district": MESSAGE.id_district,
+                item2 (integer) "level": MESSAGE.level,
+                item3 (integer) "road_distance": MESSAGE.road_distance,
+            })
+        endif
+    end
+
+procedure CHANGE_ROOT with ARGS (MESSAGE)
+    begin
+        set STATUS := "CHANGING_ROOT"
+
+        if MESSAGE.parent_district_id not in NEIGHBOURS_IN_CITY.keys then:
+            NEIGHBOURS_IN_CITY.insert({id_district: MESSAGE.id_district, road_distance: MESSAGE.road_distance})
+        endif
+
+        set DOWNTOWN := MESSAGE.downtown
+        set LEVEL := MESSAGE.level
+        set CITY_NAME := MESSAGE.city_name
+        set PARENT_DISTRICT_ID := MESSAGE.parent_district_id
+
+        set CHANGE_ROOT_REQUEST_COUNT := 0
+        set CHANGE_ROOT_RESPONSE_COUNT := 0
+
+        for each NEIGHBOUR_IN_CITY in NEIGHBOURS_IN_CITY:
+            if NEIGHBOUR_IN_CITY.id_district != PARENT_DISTRICT_ID:
+                call procedure SEND_MESSAGE("CHANGE_ROOT", MESSAGE.id_district, Message(data = {
+                    item1 (integer) "downtown": DOWNTOWN,
+                    item2 (integer) "level": LEVEL,
+                    item3 (string) "city_name": CITY_NAME,
+                    item4 (string) "parent_district_id": ID,
+                }))
+            endif
+        endfor
+
+        if CHANGE_ROOT_REQUEST_COUNT == 0 then:
+            call procedure SEND_MESSAGE("CHANGE_ROOT_COMPLETE", PARENT_DISTRICT_ID, nil)
+        endif
+    end
+
+procedure CHANGE_ROOT_COMPLETE with ARGS (MESSAGE)
+    begin
+        set CHANGE_ROOT_RESPONSE_COUNT := CHANGE_ROOT_RESPONSE_COUNT + 1
+
+        if CHANGE_ROOT_RESPONSE_COUNT >= CHANGE_ROOT_REQUEST_COUNT then:
+            set STATUS := "AVAILABLE"
+
+            if DOWNTOWN == ID then:
+                call procedure FIND()
+            else:
+                call procedure SEND_MESSAGE("CHANGE_ROOT_COMPLETE", PARENT_DISTRICT_ID, nil)
+            endif
+        endif
+    end
+
+procedure DONE with ARGS ()
+    begin
+        set STATUS := "DONE"
+
+        for each NEIGHBOUR_IN_CITY in NEIGHBOURS_IN_CITY:
+            if NEIGHBOUR_IN_CITY.ID != PARENT_DISTRICT_ID then:
+                call procedure SEND_MESSAGE("DONE", NEIGHBOUR_IN_CITY.id_district)
+            endif
+        endfor
+    end

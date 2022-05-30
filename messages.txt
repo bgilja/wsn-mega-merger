@@ -1,0 +1,10 @@
+FIND - find minimal connection to new district
+TEST - check if road leads to district in current city
+ACCEPT - connection does not lead to same city
+REJECT - connection leads to same city
+FOUND - return minimal connection to (parent) village
+CONNECT - propagate merge request from downtown to leaf that will make LETS_MERGE request
+LETS_MERGE - merge request
+CHANGE_ROOT - after merge (friendly or absorbtion) is completed, adjust memory (DOWNTOWN, LEVEL, CITY_NAME, STATUS, PARENT_DISTRICT)
+CHANGE_ROOT_COMPLETE - send after change root is compoleted and node is back is AVAILABLE status
+DONE - broadcast message to set status to 'DONE'

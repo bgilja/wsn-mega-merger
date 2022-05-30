@@ -1,0 +1,5 @@
+AVAILABLE - node is available
+FINIDING - node is awaiting information for minimal road
+CONNECTING - node is awaiting for CHANGE_ROOT response
+CHANGING_ROOT - node is awaiting for CHANGE_ROOT_COMPLETE response
+DONE - merge is complete, MST is created

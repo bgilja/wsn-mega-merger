@@ -1,0 +1,17 @@
+ID - integer & unique
+STATUS - string
+DOWNTOWN - id of root node, integer & unique
+CITY_NAME - string & unique (id of downtown)
+LEVEL - integer
+NEIGHBOURS - list of connected nodes in graph, dictionary of pairs (id_district: integer & unique, road_distance: integer & unique)
+NEIGHBOURS_IN_CITY - list of nodes connected in tree, dictionary of pairs (id_district: integer & unique, road_distance: integer & unique)
+SENT_CONNECTION_REQUEST - pair (id_district: integer & unique, road_distance: integer & unique)
+SUSPENDED_CONNECTION_REQUESTS - pair (id_district: integer & unique, road_distance: integer & unique)
+PARENT_DISTRICT (road that connects to district closer to downtown)
+MINIMAL_ROAD - pair (id_district: integer & unique, road_distance: integer & unique)
+TEST_RESPONSE_COUNT - integer
+TEST_REQUEST_COUNT - integer
+FIND_RESPONSE_COUNT - integer
+FIND_REQUEST_COUNT - integer
+CHANGE_ROOT_RESPONSE_COUNT - integer
+CHANGE_ROOT_REQUEST_COUNT - integer

@@ -1,4 +1,0 @@
-available - cvor je dostupan
-outside - cekanje povratne informacije za najblizim gradom
-processing - poslao je zahtjev za spajanjem i ceka na odgovor
-done - kad smo napravili minimalno razapinjajuce stablo stavljamo sve cvorove u done
