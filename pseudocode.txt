@@ -14,8 +14,6 @@ procedure SEND_MESSAGE with ARGS (function, id_district, message)
 
 procedure FIND with ARGS ()
     begin
-        set STATUS := "FINIDING"
-
         set MINIMAL_ROAD_DISTANCE := INF
         set TEST_REQUEST_COUNT := 0
         set TEST_RESPONSE_COUNT := 0
@@ -40,6 +38,8 @@ procedure FIND with ARGS ()
                 call SEND_MESSAGE("FIND", NEIGHBOUR_IN_CITY)
             endif
         endfor
+
+        set STATUS := "FINIDING"
     end
 
 procedure TEST with ARGS (MESSAGE)
@@ -108,8 +108,6 @@ procedure FOUND with ARGS(MESSAGE)
 
 procedure CONNECT with ARGS (MESSAGE)
     begin
-        set STATUS := "CONNECTING"
-
         for each NEIGHBOUR in NEIGHBOURS:
             if NEIGHBOUR.road_distance == MESSAGE.road_distance:
                 set SENT_CONNECTION_REQUEST = {
@@ -130,6 +128,8 @@ procedure CONNECT with ARGS (MESSAGE)
                 call procedure SEND_MESSAGE("CONNECT", NEIGHBOUR_IN_CITY.id_district, MESSAGE)
             endif
         endfor
+
+        set STATUS := "CONNECTING"
     end
 
 procedure LETS_MERGE with ARGS (MESSAGE)
@@ -164,7 +164,6 @@ procedure LETS_MERGE with ARGS (MESSAGE)
 
             insert {id_district: MESSAGE.id_district, road_distance: SENT_CONNECTION_REQUEST.road_distance} to NEIGHBOURS_IN_CITY
 
-            set STATUS := "CHANGING_ROOT"
             set CHANGE_ROOT_REQUEST_COUNT := 0
             set CHANGE_ROOT_RESPONSE_COUNT := 0
 
@@ -178,8 +177,9 @@ procedure LETS_MERGE with ARGS (MESSAGE)
                     }))
                 endif
             endfor
-        else if MESSAGE.level < LEVEL then:
+
             set STATUS := "CHANGING_ROOT"
+        else if MESSAGE.level < LEVEL then:
             set CHANGE_ROOT_REQUEST_COUNT := 0
             set CHANGE_ROOT_RESPONSE_COUNT := 0
 
@@ -192,6 +192,8 @@ procedure LETS_MERGE with ARGS (MESSAGE)
             }))
 
             insert {id_district: MESSAGE.id_district, road_distance: SENT_CONNECTION_REQUEST.road_distance} to NEIGHBOURS_IN_CITY
+
+            set STATUS := "CHANGING_ROOT"
         else:
             SUSPENDED_CONNECTION_REQUESTS.insert({
                 item1 (integer) "id_district": MESSAGE.id_district,
@@ -203,8 +205,6 @@ procedure LETS_MERGE with ARGS (MESSAGE)
 
 procedure CHANGE_ROOT with ARGS (MESSAGE)
     begin
-        set STATUS := "CHANGING_ROOT"
-
         if MESSAGE.parent_district_id not in NEIGHBOURS_IN_CITY.keys then:
             NEIGHBOURS_IN_CITY.insert({id_district: MESSAGE.id_district, road_distance: MESSAGE.road_distance})
         endif
@@ -231,6 +231,8 @@ procedure CHANGE_ROOT with ARGS (MESSAGE)
         if CHANGE_ROOT_REQUEST_COUNT == 0 then:
             call procedure SEND_MESSAGE("CHANGE_ROOT_COMPLETE", PARENT_DISTRICT_ID, nil)
         endif
+
+        set STATUS := "CHANGING_ROOT"
     end
 
 procedure CHANGE_ROOT_COMPLETE with ARGS (MESSAGE)
@@ -238,23 +240,23 @@ procedure CHANGE_ROOT_COMPLETE with ARGS (MESSAGE)
         set CHANGE_ROOT_RESPONSE_COUNT := CHANGE_ROOT_RESPONSE_COUNT + 1
 
         if CHANGE_ROOT_RESPONSE_COUNT >= CHANGE_ROOT_REQUEST_COUNT then:
-            set STATUS := "AVAILABLE"
-
             if DOWNTOWN == ID then:
                 call procedure FIND()
             else:
                 call procedure SEND_MESSAGE("CHANGE_ROOT_COMPLETE", PARENT_DISTRICT_ID, nil)
             endif
+
+            set STATUS := "AVAILABLE"
         endif
     end
 
 procedure DONE with ARGS ()
     begin
-        set STATUS := "DONE"
-
         for each NEIGHBOUR_IN_CITY in NEIGHBOURS_IN_CITY:
             if NEIGHBOUR_IN_CITY.ID != PARENT_DISTRICT_ID then:
                 call procedure SEND_MESSAGE("DONE", NEIGHBOUR_IN_CITY.id_district)
             endif
         endfor
+
+        set STATUS := "DONE"
     end
