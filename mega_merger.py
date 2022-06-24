@@ -6,8 +6,6 @@ INF = 9999
 
 # Abstract
 class BaseMegaMerger(NodeAlgorithm):
-    processed_messages = set()
-    messages_sent = 0
     
     def add_road(self, node1, node2):
         node1_neighbour_ids = [n.id for n in node1.memory['neighbours_in_city']]
@@ -27,31 +25,14 @@ class BaseMegaMerger(NodeAlgorithm):
         print("Node {} change status from {} to: {}".format(node.id, node.status, status))
         node.status = status
     
-    def determine_new_city_name(self, node1, node2):
-        if node1.memory["level"] == 1:
-            node1_districts = [str(node1.id)]
-        else:
-            node1_districts = node1.memory['city_name'].replace("(", "").replace(")", "").split('_')
-        
-        if node2.memory["level"] == 1:
-            node2_districts = [str(node2.id)]
-        else:
-            node2_districts = node2.memory['city_name'].replace("(", "").replace(")", "").split('_')
-            
-        districts = list(set(node1_districts + node2_districts))
-        return "({})".format("_".join(districts))
+    def determine_new_city_name(self, node1, node2, action):
+        return "[{}{}{}]".format(node1.memory['city_name'], action, node2.memory['city_name'])
     
     # Returns neighbour with selected id
     def get_neighbour_by_id(self, node, destination_id):
         for neighbour in node.memory[self.neighborsKey]:
             if neighbour.id == destination_id:
                 return neighbour
-        return None
-    
-    def get_node_by_id(self, node_id):
-        for node in self.network.nodes():
-            if node.id == node_id:
-                return node
         return None
     
     def handle_test_response(self, node, message):
@@ -103,16 +84,12 @@ class MegaMerger(BaseMegaMerger):
                 continue
                 
             if log_message:
-                print(
-                    message.data["message_id"],
+                print("Node id: {}, Node status {}, Message id: {}, Message header: {}".format(
                     node.id,
-                    node.memory['city_name'],
-                    node.memory['downtown_id'],
-                    node.memory['level'],
-                    message.header,
                     node.status,
-                    message.data['source_node_id'],
-                 )
+                    message.data["message_id"],
+                    message.header,
+                ))
             
             if required_status is not None and node.status != required_status:
                 print("Node status ({}) is not required status {}".format(node.status, required_status))
@@ -124,6 +101,9 @@ class MegaMerger(BaseMegaMerger):
         print("Extra message " + message.header)
     
     def initializer(self):
+        self.processed_messages = set()
+        self.messages_sent = 0
+
         for node in self.network.nodes():
             node.memory[self.neighborsKey] = node.compositeSensor.read()['Neighbors']
             
@@ -227,6 +207,13 @@ class MegaMerger(BaseMegaMerger):
             return
         
         node.memory['test_response_count'] += 1
+
+        if node.memory['minimal_road_distance'] == message.data['distance'] and \
+            min(node.memory['minimal_road_distance_start_node_id'], node.memory['minimal_road_distance_destination_node_id']) > \
+                min(message.data['start_node_id'], message.data['destination_node_id']):
+            node.memory['minimal_road_distance_start_node_id'] = message.data['start_node_id']
+            node.memory['minimal_road_distance_destination_node_id'] = message.data['destination_node_id']
+
         if node.memory['minimal_road_distance'] > message.data['distance']:
             node.memory['minimal_road_distance'] = message.data['distance']
             node.memory['minimal_road_distance_start_node_id'] = message.data['start_node_id']
@@ -246,6 +233,12 @@ class MegaMerger(BaseMegaMerger):
             return
         
         node.memory['find_response_count'] += 1
+
+        if node.memory['minimal_road_distance'] == message.data['minimal_road_distance'] and \
+            min(node.memory['minimal_road_distance_start_node_id'], node.memory['minimal_road_distance_destination_node_id']) > \
+                min(message.data['start_node_id'], message.data['destination_node_id']):
+            node.memory['minimal_road_distance_start_node_id'] = message.data['start_node_id']
+            node.memory['minimal_road_distance_destination_node_id'] = message.data['destination_node_id']
         
         if node.memory['minimal_road_distance'] > message.data['minimal_road_distance']:
             node.memory['minimal_road_distance_start_node_id'] = message.data['start_node_id']
@@ -313,20 +306,38 @@ class MegaMerger(BaseMegaMerger):
                 if received_request is not None:
                     other_node = self.get_neighbour_by_id(node, received_request["start_node_id"])
                     self.add_road(node, other_node)
-                    
-                    downtown_node = self.get_node_by_id(node.memory["downtown_id"])
 
-                    self.send_message(node, Message(
-                        destination=[downtown_node],
-                        header='Change root',
-                        data={
-                            'new_downtown_id': node.memory["downtown_id"],
-                            'new_city_name': self.determine_new_city_name(other_node, node),
-                            'new_level': node.memory["level"],
-                            'new_parent_district': downtown_node,
-                            'merge_type': "absorption"
-                        }
-                    ))
+                    if node.memory["level"] == other_node.memory["level"]:
+                        if node.id < other_node.id:
+                            downtown_node = node
+                        else:
+                            downtown_node = other_node
+
+                        self.send_message(node, Message(
+                            destination=[downtown_node],
+                            header='Change root',
+                            data={
+                                'new_downtown_id': downtown_node.id,
+                                'new_city_name': self.determine_new_city_name(node, other_node, "F"),
+                                'new_level': downtown_node.memory["level"] + 1,
+                                'new_parent_district': downtown_node,
+                                'merge_type': "absorption"
+                            }
+                        ))
+                    else:
+                        downtown_node = node
+
+                        self.send_message(node, Message(
+                            destination=[downtown_node],
+                            header='Change root',
+                            data={
+                                'new_downtown_id': downtown_node.id,
+                                'new_city_name': self.determine_new_city_name(node, other_node, "A"),
+                                'new_level': downtown_node.memory["level"],
+                                'new_parent_district': downtown_node,
+                                'merge_type': "absorption"
+                            }
+                        ))
                 else:
                     node.memory['sent_connection_request'] = message.data
                     
@@ -362,22 +373,22 @@ class MegaMerger(BaseMegaMerger):
         node.memory['received_connection_request'].append(message.data)
         
         if message.data["level"] < node.memory['level']:
-            print("ABSORPTION", "LETS MERGE", node.id, node.memory['city_name'], message.data)
+            # print("ABSORPTION", "LETS MERGE", node.id, node.memory['city_name'], message.data)
             return
         
         sent_connection_request = node.memory['sent_connection_request']
         
         if sent_connection_request is None:
-            print("SUSPEND (no request)", "LETS MERGE", node.id, node.memory['city_name'], message.data)
+            # print("SUSPEND (no request)", "LETS MERGE", node.id, node.memory['city_name'], message.data)
             return
         
         if sent_connection_request["destination_node_id"] != message.data["start_node_id"] or \
             sent_connection_request["start_node_id"] != message.data["destination_node_id"]:
-            print("SUSPEND (different road)", "LETS MERGE", node.id, node.memory['city_name'], message.data, sent_connection_request)
+            # print("SUSPEND (different road)", "LETS MERGE", node.id, node.memory['city_name'], message.data, sent_connection_request)
             return
         
         if message.data["level"] > node.memory['level']:
-            print("SUSPEND", "LETS MERGE", node.id, node.memory['city_name'], message.data)
+            # print("SUSPEND", "LETS MERGE", node.id, node.memory['city_name'], message.data)
             return
         
         # proceed with friendly merger
@@ -395,7 +406,7 @@ class MegaMerger(BaseMegaMerger):
                 header='Change root',
                 data={
                     'new_downtown_id': node.id,
-                    'new_city_name': self.determine_new_city_name(node, other_node),
+                    'new_city_name': self.determine_new_city_name(node, other_node, "F"),
                     'new_level': new_level,
                     'new_parent_district': None,
                     'merge_type': "frieldy"
@@ -410,7 +421,7 @@ class MegaMerger(BaseMegaMerger):
                 header='Change root',
                 data={
                     'new_downtown_id': min_node_id,
-                    'new_city_name': self.determine_new_city_name(other_node, node),
+                    'new_city_name': self.determine_new_city_name(node, other_node, "F"),
                     'new_level': new_level,
                     'new_parent_district': None,
                     'merge_type': "frieldy"
@@ -459,8 +470,6 @@ class MegaMerger(BaseMegaMerger):
             return
         
         node.memory['change_root_response_count'] += 1
-        print(node.id, 'change_root_response_count', node.memory['change_root_response_count'], node.memory['change_root_request_count']+1)
-
         if node.memory['change_root_response_count'] < node.memory['change_root_request_count'] + 1:
             return
         
